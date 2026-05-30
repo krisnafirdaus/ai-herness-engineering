@@ -104,4 +104,4 @@ class Planner:
     def _default_checks(tree: list[str]) -> list[str]:
         if "package.json" in tree:
             return ["node --test", "node scripts/lint.js"]
-        return ["python -m unittest discover -s tests -t .", "python scripts/lint.py"]
+        return ["python3 -m unittest discover -s tests -t .", "python3 scripts/lint.py"]
