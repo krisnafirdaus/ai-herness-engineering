@@ -98,10 +98,10 @@ class MockClient:
     def _infer_checks(tree: list[str]) -> list[str]:
         s = set(tree)
         if "scripts/lint.py" in s or any(p.startswith("tests/") for p in tree):
-            return ["python -m unittest discover -s tests -t .", "python scripts/lint.py"]
+            return ["python3 -m unittest discover -s tests -t .", "python3 scripts/lint.py"]
         if "package.json" in s:
             return ["node --test", "node scripts/lint.js"]
-        return ["python -m unittest discover", "python -m py_compile $(git ls-files '*.py')"]
+        return ["python3 -m unittest discover", "python3 -m py_compile $(git ls-files '*.py')"]
 
     @staticmethod
     def _pick_target(task: str, tree: list[str]) -> str:

@@ -43,7 +43,7 @@ LLM SDKs, Docker, Langfuse, pytest) live in `requirements.txt`:
 
 ```bash
 git clone <this-repo> && cd ai-herness-engineering
-python -m pip install -r requirements.txt pytest   # optional; or: make setup
+python3 -m pip install -r requirements.txt pytest   # optional; or: make setup
 ```
 
 ## 2. Run locally (offline, zero API keys)
@@ -54,7 +54,7 @@ workspace). So this works immediately:
 
 ```bash
 make demo
-# └─ python -m src.main run --repo ./dummy-repos/python-api-sample \
+# └─ python3 -m src.main run --repo ./dummy-repos/python-api-sample \
 #        --task "Add request validation to the user creation endpoint"
 ```
 
@@ -65,14 +65,14 @@ telemetry breakdown, the event log, and the final diff.
 Useful commands:
 
 ```bash
-python -m src.main run    --repo <url|path> --task "..."   # create + drive a run
-python -m src.main resume --run-id run_xxx                 # resume after a crash
-python -m src.main recover                                 # resume ALL stuck runs
-python -m src.main status --run-id run_xxx                 # run + step state
-python -m src.main traces --run-id run_xxx                 # token/latency breakdown
-python -m src.main log    --run-id run_xxx                 # event log
-python -m src.main diff   --run-id run_xxx                 # the produced diff (PR body)
-python -m src.main list                                    # all runs
+python3 -m src.main run    --repo <url|path> --task "..."   # create + drive a run
+python3 -m src.main resume --run-id run_xxx                 # resume after a crash
+python3 -m src.main recover                                 # resume ALL stuck runs
+python3 -m src.main status --run-id run_xxx                 # run + step state
+python3 -m src.main traces --run-id run_xxx                 # token/latency breakdown
+python3 -m src.main log    --run-id run_xxx                 # event log
+python3 -m src.main diff   --run-id run_xxx                 # the produced diff (PR body)
+python3 -m src.main list                                    # all runs
 ```
 
 ## 3. Run against the dummy repos (or any repo)
@@ -81,12 +81,12 @@ Two **dependency-free** dummy backends are bundled (their tests/linters use only
 stdlib / Node built-ins — nothing to `npm install` or `pip install`):
 
 ```bash
-make demo            # Python target  (python -m unittest + stdlib lint)
+make demo            # Python target  (python3 -m unittest + stdlib lint)
 make demo-node       # Node target    (node --test     + stdlib lint)
 
 # any public repo (uses a real provider for non-trivial tasks — see §6):
 HARNESS_LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-... \
-  python -m src.main run --repo https://github.com/you/your-api \
+  python3 -m src.main run --repo https://github.com/you/your-api \
                          --task "Refactor sync DB calls to async"
 ```
 
@@ -139,8 +139,8 @@ If a worker dies at step 4 of 10:
 
 ```bash
 # Demonstrate it:
-python -m src.worker --recover        # resume all stuck runs and exit
-python -m src.main resume --run-id run_xxx
+python3 -m src.worker --recover        # resume all stuck runs and exit
+python3 -m src.main resume --run-id run_xxx
 ```
 
 This is covered by `tests/test_orchestrator.py::test_crash_recovery_resumes_without_replanning`,
@@ -189,7 +189,7 @@ Build the sandbox image (enables the Docker backend):
 
 ```bash
 make sandbox-image        # docker build -t harness-sandbox:latest -f infra/Dockerfile.sandbox .
-HARNESS_SANDBOX=docker python -m src.main run --repo ./dummy-repos/python-api-sample --task "..."
+HARNESS_SANDBOX=docker python3 -m src.main run --repo ./dummy-repos/python-api-sample --task "..."
 ```
 
 ## 8. Telemetry setup
@@ -200,7 +200,7 @@ invocation with `input_tokens`, `output_tokens`, `duration_ms`,
 breakdown offline with **no external service**:
 
 ```bash
-python -m src.main traces --run-id run_xxx
+python3 -m src.main traces --run-id run_xxx
 ```
 
 ```
@@ -219,14 +219,14 @@ python -m src.main traces --run-id run_xxx
 exported as a Langfuse generation (telemetry export never affects run outcome):
 
 ```bash
-LANGFUSE_PUBLIC_KEY=pk-... LANGFUSE_SECRET_KEY=sk-... python -m src.main run ...
+LANGFUSE_PUBLIC_KEY=pk-... LANGFUSE_SECRET_KEY=sk-... python3 -m src.main run ...
 ```
 
 ## 9. Viewing traces
 
-* **CLI:** `python -m src.main traces --run-id run_xxx` (summary + per-span rows)
+* **CLI:** `python3 -m src.main traces --run-id run_xxx` (summary + per-span rows)
 * **API:** `GET /runs/{id}/traces` returns the same data as JSON
-* **Event log:** `python -m src.main log --run-id run_xxx` (every transition)
+* **Event log:** `python3 -m src.main log --run-id run_xxx` (every transition)
 * **Langfuse:** open your Langfuse project — traces are keyed by `run_id`
 
 ## 10. Production deployment
@@ -304,7 +304,7 @@ All via env (or a `.env` — see `.env.example`). Highlights: `HARNESS_LLM_PROVI
 ## Testing
 
 ```bash
-make test        # python -m pytest -q
+make test        # python3 -m pytest -q
 ```
 
 Covers the happy path (with a real verify-fail→fix cycle), telemetry breakdown,
