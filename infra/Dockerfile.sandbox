@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sandbox image — the *untrusted* runtime in which a target repo's tests/lint
+# execute. Kept minimal: Node 20 + Python 3.11 + git + coreutils (`timeout`).
+# Build:  docker build -t harness-sandbox:latest -f infra/Dockerfile.sandbox .
+# It is run by the harness with --network none, read-only root fs, and a single
+# writable bind mount at /workspace (see src/sandbox/docker_runner.py).
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 git coreutils ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python
+
+# Non-root by default; the bind-mounted workspace is chowned by the host owner.
+USER node
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

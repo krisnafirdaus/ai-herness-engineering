@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Harness runtime artifacts
+/workspaces/
+*.sqlite3
+*.sqlite3-journal
+harness.sqlite3*
+.env
+
+# Node (inside dummy repos)
+node_modules/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

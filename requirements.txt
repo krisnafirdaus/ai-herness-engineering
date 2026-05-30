@@ -1,0 +1,25 @@
+# ── Core runtime ────────────────────────────────────────────────────────────
+# The orchestrator, state machine, storage (SQLite) and local sandbox run on the
+# Python standard library ALONE. Nothing below is required for the offline demo
+# (`make demo`) to work — they unlock optional production integrations.
+
+# API server (optional — `python -m src.main run` works without it)
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.7.4
+
+# Real LLM providers (optional — the deterministic offline mock needs neither)
+anthropic==0.34.2
+openai==1.40.0
+
+# Docker sandbox (optional — local isolated-workspace sandbox is the fallback)
+docker==7.1.0
+
+# Telemetry export (optional — tracing always works via the SQLite span store)
+langfuse==2.44.0
+
+# Redis-backed queue for horizontal worker scaling (optional — DB queue is default)
+redis==5.0.7
+
+# Postgres state backend (optional — SQLite is default)
+psycopg[binary]==3.2.1
