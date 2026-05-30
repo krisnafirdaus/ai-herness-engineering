@@ -1,0 +1,43 @@
+# Worker pool — the horizontal scaling unit. Each replica consumes the Redis
+# queue and drives runs independently; runs are isolated by run_id/workspace.
+#
+# Sandbox isolation in k8s: do NOT mount the host docker.sock in a multi-tenant
+# cluster. Production-grade options (pick per threat model):
+#   * a sandboxed container runtime (gVisor/Kata) as the worker's RuntimeClass,
+#     and launch each run's checks as a nested job;
+#   * or schedule each run as its own Kubernetes Job with a restricted
+#     PodSecurityContext + NetworkPolicy (deny-all egress) — the cleanest tenant
+#     boundary. The bundled worker uses the Docker backend; swapping in a
+#     "k8s Job" sandbox backend implements the same src.sandbox.base.Sandbox API.
+#
+# Autoscale on queue depth via KEDA (ScaledObject on the Redis list length).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-worker
+spec:
+  replicas: 4                      # scale out for thousands of concurrent runs
+  selector:
+    matchLabels: {app: harness-worker}
+  template:
+    metadata:
+      labels: {app: harness-worker}
+    spec:
+      # runtimeClassName: gvisor   # <- recommended for untrusted repo execution
+      containers:
+        - name: worker
+          image: harness:latest
+          command: ["python", "-m", "src.worker"]
+          envFrom:
+            - configMapRef: {name: harness-config}
+          env:
+            - name: HARNESS_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: harness-db, key: DATABASE_URL}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: harness-llm, key: ANTHROPIC_API_KEY, optional: true}}
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "2", memory: "2Gi"}
+      # On restart, each worker's startup recover() resumes any non-terminal runs
+      # it finds in the DB, so a pod eviction mid-run never strands or restarts work.
+      terminationGracePeriodSeconds: 30

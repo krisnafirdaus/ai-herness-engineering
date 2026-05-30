@@ -1,0 +1,51 @@
+# Postgres state store. In production prefer a managed instance (RDS/Cloud SQL)
+# over an in-cluster single replica; this manifest is a self-contained blueprint.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: harness-db
+type: Opaque
+stringData:
+  POSTGRES_USER: harness
+  POSTGRES_PASSWORD: harness
+  POSTGRES_DB: harness
+  DATABASE_URL: postgresql://harness:harness@postgres:5432/harness
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          envFrom:
+            - secretRef: {name: harness-db}
+          ports: [{containerPort: 5432}]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "harness"]}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]
