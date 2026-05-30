@@ -1,0 +1,52 @@
+# Stateless API control plane. Scale on HTTP load (it only enqueues + reads state).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harness-config
+data:
+  HARNESS_QUEUE: redis
+  HARNESS_REDIS_URL: redis://redis:6379/0
+  HARNESS_SANDBOX: docker
+  HARNESS_SANDBOX_IMAGE: harness-sandbox:latest
+  HARNESS_MAX_RETRIES: "3"
+  HARNESS_MAX_TOKENS_PER_RUN: "200000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: harness-api}
+  template:
+    metadata:
+      labels: {app: harness-api}
+    spec:
+      containers:
+        - name: api
+          image: harness:latest
+          command: ["uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+          envFrom:
+            - configMapRef: {name: harness-config}
+          env:
+            - name: HARNESS_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: harness-db, key: DATABASE_URL}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: harness-llm, key: ANTHROPIC_API_KEY, optional: true}}
+          ports: [{containerPort: 8000}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "100m", memory: "256Mi"}
+            limits: {cpu: "500m", memory: "512Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: harness-api
+spec:
+  selector: {app: harness-api}
+  ports: [{port: 80, targetPort: 8000}]
