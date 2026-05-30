@@ -1,7 +1,7 @@
 # Convenience targets. The harness core needs only the Python stdlib; `setup`
 # installs the OPTIONAL extras (API server, real LLM SDKs, Docker, Langfuse).
 .DEFAULT_GOAL := help
-PY ?= python
+PY ?= python3
 REPO ?= ./dummy-repos/python-api-sample
 TASK ?= Add request validation to the user creation endpoint
 
@@ -46,8 +46,13 @@ recover: ## Crash recovery: resume ALL non-terminal runs and exit
 	$(PY) -m src.main recover
 
 .PHONY: test
-test: ## Run the test suite
-	$(PY) -m pytest -q
+test: ## Run the test suite (auto-bootstraps pytest into .venv if missing)
+	@if $(PY) -c "import pytest" >/dev/null 2>&1; then \
+		$(PY) -m pytest -q; \
+	else \
+		echo "→ pytest not found; bootstrapping an isolated .venv (pytest only)"; \
+		$(PY) -m venv .venv && .venv/bin/python -m pip -q install pytest && .venv/bin/python -m pytest -q; \
+	fi
 
 .PHONY: sandbox-image
 sandbox-image: ## Build the Docker sandbox image (enables the docker sandbox)
