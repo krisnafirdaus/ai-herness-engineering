@@ -2,16 +2,16 @@
 
 Examples::
 
-    python -m src.main run --repo ./dummy-repos/python-api-sample \
+    python3 -m src.main run --repo ./dummy-repos/python-api-sample \
         --task "Add request validation to the user creation endpoint"
 
-    python -m src.main resume  --run-id run_abc123      # continue after a crash
-    python -m src.main recover                          # resume ALL stuck runs
-    python -m src.main status  --run-id run_abc123
-    python -m src.main traces  --run-id run_abc123      # token/latency breakdown
-    python -m src.main log     --run-id run_abc123
-    python -m src.main diff    --run-id run_abc123
-    python -m src.main list
+    python3 -m src.main resume  --run-id run_abc123      # continue after a crash
+    python3 -m src.main recover                          # resume ALL stuck runs
+    python3 -m src.main status  --run-id run_abc123
+    python3 -m src.main traces  --run-id run_abc123      # token/latency breakdown
+    python3 -m src.main log     --run-id run_abc123
+    python3 -m src.main diff    --run-id run_abc123
+    python3 -m src.main list
 """
 from __future__ import annotations
 
@@ -66,8 +66,8 @@ def cmd_run(args) -> int:
     if run.status == RunState.COMPLETED.value and run.workspace_path:
         files = RepoManager(run.workspace_path).changed_files(run.base_ref)
         print(f"\n  changed files: {', '.join(files) or '(none)'}")
-        print(f"  inspect diff : python -m src.main diff --run-id {run.run_id}")
-    print(f"  traces       : python -m src.main traces --run-id {run.run_id}\n")
+        print(f"  inspect diff : python3 -m src.main diff --run-id {run.run_id}")
+    print(f"  traces       : python3 -m src.main traces --run-id {run.run_id}\n")
     return 0 if run.status == RunState.COMPLETED.value else 1
 
 
@@ -155,7 +155,7 @@ def cmd_list(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="python -m src.main",
+    p = argparse.ArgumentParser(prog="python3 -m src.main",
                                 description="Autonomous multi-file refactoring agent harness")
     sub = p.add_subparsers(dest="command", required=True)
 
