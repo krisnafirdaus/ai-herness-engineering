@@ -1,5 +1,8 @@
 # AI Agent Harness — Autonomous Multi-File Refactoring Runner
 
+> **📹 Demo video (~4 min):** https://drive.google.com/file/d/1r9iFWEY5lMzzWTs6Re_eC5Nivjt2mhAJ/view?usp=sharing
+> — real-time run, the verify-fail → self-fix loop, telemetry, rollback, and crash→resume.
+
 A **production-shaped harness** that takes a public GitHub repo + a task, then
 drives three agents — **Planner → Executor → Verifier** — to plan a refactor,
 edit files in an isolated sandbox, run the repo's tests/linters, **fix its own
@@ -32,6 +35,22 @@ of 10 resumes from step 4 — without re-planning or re-paying for verified step
             │
             ▼  exhausted → FAILED → ROLLED_BACK      all steps green → COMPLETED (PR-ready)
 ```
+
+---
+
+## Requirement map (assessment → where it lives)
+
+| Assessment requirement | Where it's satisfied | Proof |
+|---|---|---|
+| **Planner** — read-only, strict-JSON plan + dependency hints | `src/orchestrator/planner.py` | emits typed `Step` rows; makes zero write calls |
+| **Executor** — separate worker, sandboxed, file-by-file | `src/orchestrator/executor.py`, `src/sandbox/` | `read_file`/`write_file`/`search_replace`, traversal-guarded |
+| **Verifier** — test+lint, capture stderr → route back to Executor | `src/orchestrator/verifier.py` | spans show `failed iter=0 → retry → passed iter=1` |
+| **Hard-abort + rollback** after retries exhausted | `src/orchestrator/state_machine.py`, `states.py` | `FAILED → ROLLED_BACK`; `make test` covers it |
+| **State mgmt & resilience** — crash mid-run, resume without re-planning | `state_machine.py`, `src/storage/` | `tests/test_orchestrator.py::test_crash_recovery_resumes_without_replanning` (Planner called exactly once) |
+| **Telemetry** — token per agent node, span durations, loop breakdown | `src/telemetry/tracing.py` | `python3 -m src.main traces --run-id …` |
+| **Cost guardrails** — retry + token budget + step timeout | `src/config.py`, `state_machine.py` | §6 below; `test_token_budget_guardrail_trips` |
+| **Deployment & horizontal scaling** | `infra/Dockerfile`, `docker-compose.yml`, `k8s/` | §10 below |
+| **Tenant isolation** — Agent A can't read Agent B's FS | `src/sandbox/docker_runner.py`, `infra/k8s/worker.yaml` | per-run network-none container + per-`run_id` bind mount |
 
 ---
 
