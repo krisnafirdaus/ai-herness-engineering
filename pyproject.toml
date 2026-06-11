@@ -15,3 +15,13 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: touches a real external service (skipped when unavailable)",
+    "docker: requires a reachable Docker daemon + a suitable image",
+    "redis: requires a reachable Redis (HARNESS_TEST_REDIS_URL)",
+    "postgres: requires a reachable Postgres (HARNESS_TEST_POSTGRES_URL)",
+    "network: requires outbound network access (github.com)",
+    "llm: requires a real provider API key (ANTHROPIC_API_KEY / OPENAI_API_KEY)",
+    "k8s: requires a reachable Kubernetes cluster (HARNESS_TEST_K8S=1)",
+    "github_write: pushes branches/PRs to HARNESS_TEST_GITHUB_REPO (opt-in)",
+]

@@ -85,6 +85,17 @@ def get_connection() -> ConnectionProxy:
     return conn
 
 
+def reset_connections() -> None:
+    """Drop this thread's cached connection (tests switch DATABASE_URL)."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn._raw.close()
+        except Exception:
+            pass
+        _local.conn = None
+
+
 # Neutral schema: `{PK}` is expanded per-dialect; placeholders are `?`.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (

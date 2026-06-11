@@ -46,13 +46,32 @@ recover: ## Crash recovery: resume ALL non-terminal runs and exit
 	$(PY) -m src.main recover
 
 .PHONY: test
-test: ## Run the test suite (auto-bootstraps pytest into .venv if missing)
+test: ## Run unit tests (integration tests skip when their service is absent)
 	@if $(PY) -c "import pytest" >/dev/null 2>&1; then \
-		$(PY) -m pytest -q; \
+		$(PY) -m pytest tests -q --ignore=tests/integration; \
 	else \
 		echo "→ pytest not found; bootstrapping an isolated .venv (pytest only)"; \
-		$(PY) -m venv .venv && .venv/bin/python -m pip -q install pytest && .venv/bin/python -m pytest -q; \
+		$(PY) -m venv .venv && .venv/bin/python -m pip -q install pytest && .venv/bin/python -m pytest tests -q --ignore=tests/integration; \
 	fi
+
+.PHONY: test-integration
+test-integration: ## Run integration tests (Docker/Redis/PG/API/network gated per-test)
+	HARNESS_TEST_REDIS_URL=$${HARNESS_TEST_REDIS_URL:-redis://localhost:6399/0} \
+	$(PY) -m pytest tests/integration -q -rs
+
+.PHONY: test-all
+test-all: ## Unit + integration in one go
+	$(PY) -m pytest tests -q -rs
+
+.PHONY: test-services-up
+test-services-up: ## Start redis+postgres for integration tests (non-default ports)
+	docker compose -f infra/docker-compose.test.yml up -d --wait
+	@echo "export HARNESS_TEST_REDIS_URL=redis://localhost:6399/0"
+	@echo "export HARNESS_TEST_POSTGRES_URL=postgresql://harness:harness@localhost:5544/harness_test"
+
+.PHONY: test-services-down
+test-services-down: ## Stop the integration test services
+	docker compose -f infra/docker-compose.test.yml down -v
 
 .PHONY: sandbox-image
 sandbox-image: ## Build the Docker sandbox image (enables the docker sandbox)
