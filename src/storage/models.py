@@ -34,6 +34,7 @@ class Step:
     action: str
     reason: str
     checks: list[str]
+    depends_on: list[str] = field(default_factory=list)
     status: str = StepStatus.PENDING.value
     iterations: int = 0
     last_error: dict | None = None
@@ -45,6 +46,7 @@ class Step:
             id=r["id"], run_id=r["run_id"], step_index=r["step_index"],
             step_id=r["step_id"], file=r["file"], action=r["action"],
             reason=r["reason"], checks=json.loads(r["checks_json"]),
+            depends_on=json.loads(r["depends_on_json"]) if r["depends_on_json"] else [],
             status=r["status"], iterations=r["iterations"],
             last_error=json.loads(r["last_error"]) if r["last_error"] else None,
         )
@@ -64,6 +66,7 @@ class Run:
     plan_json: str | None = None
     tokens_used: int = 0
     error: str | None = None
+    pr_url: str | None = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
@@ -78,7 +81,7 @@ class Run:
             status=r["status"], branch=r["branch"], workspace_path=r["workspace_path"],
             base_ref=r["base_ref"], current_step=r["current_step"],
             total_steps=r["total_steps"], plan_json=r["plan_json"],
-            tokens_used=r["tokens_used"], error=r["error"],
+            tokens_used=r["tokens_used"], error=r["error"], pr_url=r["pr_url"],
             created_at=r["created_at"], updated_at=r["updated_at"],
         )
 
@@ -156,11 +159,12 @@ class Repository:
         run.updated_at = _now()
         self.conn.execute(
             """UPDATE runs SET status=?, branch=?, workspace_path=?, base_ref=?,
-                   current_step=?, total_steps=?, plan_json=?, error=?, updated_at=?
+                   current_step=?, total_steps=?, plan_json=?, error=?, pr_url=?,
+                   updated_at=?
                WHERE run_id=?""",
             (run.status, run.branch, run.workspace_path, run.base_ref,
              run.current_step, run.total_steps, run.plan_json,
-             run.error, run.updated_at, run.run_id),
+             run.error, run.pr_url, run.updated_at, run.run_id),
         )
 
     def add_tokens(self, run_id: str, tokens: int) -> int:
@@ -179,11 +183,12 @@ class Repository:
         for s in steps:
             self.conn.execute(
                 """INSERT INTO steps (run_id, step_index, step_id, file, action,
-                       reason, checks_json, status, iterations, last_error,
-                       created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       reason, checks_json, depends_on_json, status, iterations,
+                       last_error, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, s.step_index, s.step_id, s.file, s.action, s.reason,
-                 json.dumps(s.checks), s.status, s.iterations,
+                 json.dumps(s.checks), json.dumps(s.depends_on), s.status,
+                 s.iterations,
                  json.dumps(s.last_error) if s.last_error else None, _now(), _now()),
             )
 

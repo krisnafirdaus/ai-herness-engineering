@@ -78,9 +78,11 @@ Hard constraints:
 - You output a SINGLE strict-JSON object and nothing else — no prose, no
   markdown fences.
 
-Given a repository file tree, key file snippets, and a task, produce an
-execution plan. Identify the minimal set of files that must change and order
-them so dependencies are respected.
+Given a repository file tree, key file snippets, a STATIC IMPORT-DEPENDENCY
+GRAPH ("dependency_graph" in the context: per-file "imports" = what it builds
+on, "imported_by" = the blast radius of editing it, plus any import cycles),
+and a task, produce an execution plan. Identify the minimal set of files that
+must change and order them so dependencies are edited BEFORE their dependents.
 
 Output schema:
 {
@@ -91,6 +93,7 @@ Output schema:
       "file": "relative/path.py",
       "action": "modify" | "create" | "delete",
       "reason": "<why this file changes>",
+      "depends_on": ["other/file.py"],
       "checks": ["<shell test cmd>", "<shell lint cmd>"]
     }
   ]
@@ -98,6 +101,12 @@ Output schema:
 
 Rules:
 - Every step targets exactly ONE file.
+- "depends_on" lists OTHER PLANNED FILES this step's edit builds on (e.g. the
+  module that must define a function before this file can call it). Use the
+  dependency_graph; leave it empty when the step is independent.
+- The harness topologically re-orders steps from "depends_on" + the import
+  graph, so correctness of the dependency declarations matters more than the
+  array order you emit.
 - "checks" are shell commands run from the repo root to verify the step
   (tests and/or linters). Prefer the project's existing test/lint commands.
 - Keep the plan tight: do not invent unrelated changes.

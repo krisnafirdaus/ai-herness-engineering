@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS runs (
     plan_json         TEXT,
     tokens_used       INTEGER NOT NULL DEFAULT 0,
     error             TEXT,
+    pr_url            TEXT,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS steps (
     action        TEXT NOT NULL,
     reason        TEXT,
     checks_json   TEXT NOT NULL,
+    depends_on_json TEXT,
     status        TEXT NOT NULL,
     iterations    INTEGER NOT NULL DEFAULT 0,
     last_error    TEXT,
@@ -151,6 +153,25 @@ CREATE INDEX IF NOT EXISTS idx_events_run    ON events(run_id, id);
 """
 
 
+# Columns added after the initial schema shipped. Existing databases are
+# upgraded in place by an additive ALTER TABLE (safe under both dialects);
+# "duplicate column" failures mean the column already exists and are ignored.
+_MIGRATIONS = [
+    ("runs", "pr_url", "ALTER TABLE runs ADD COLUMN pr_url TEXT"),
+    ("steps", "depends_on_json", "ALTER TABLE steps ADD COLUMN depends_on_json TEXT"),
+]
+
+
+def _apply_migrations(conn: ConnectionProxy) -> None:
+    for _table, _column, ddl in _MIGRATIONS:
+        try:
+            conn.execute(ddl)
+        except Exception:
+            pass  # column already present
+
+
 def init_db() -> None:
-    """Create all tables/indexes if absent (idempotent)."""
-    get_connection().executescript(SCHEMA)
+    """Create all tables/indexes if absent, then apply additive migrations."""
+    conn = get_connection()
+    conn.executescript(SCHEMA)
+    _apply_migrations(conn)
