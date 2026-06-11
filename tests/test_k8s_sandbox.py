@@ -26,6 +26,7 @@ def test_pod_manifest_is_hardened():
     assert spec["automountServiceAccountToken"] is False
     assert spec["enableServiceLinks"] is False
     assert spec["restartPolicy"] == "Never"
+    assert c["imagePullPolicy"] == "IfNotPresent"  # side-loaded images (kind/airgapped)
     assert sc["runAsNonRoot"] is True and sc["runAsUser"] == 1000
     assert sc["allowPrivilegeEscalation"] is False
     assert sc["readOnlyRootFilesystem"] is True

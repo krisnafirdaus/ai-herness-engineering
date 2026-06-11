@@ -55,7 +55,10 @@ services:
       HARNESS_LLM_PROVIDER: ${HARNESS_LLM_PROVIDER:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      HARNESS_HOST_WORKSPACES_ROOT: ${PWD}/workspaces/runs
+      # HOST path of the ../workspaces bind above (docker-out-of-docker: the
+      # host daemon resolves sandbox bind sources). ${PWD} is infra/ per the
+      # README (`cd infra && docker compose up`); override when using -f.
+      HARNESS_HOST_WORKSPACES_ROOT: ${HARNESS_HOST_WORKSPACES_ROOT:-${PWD}/../workspaces/runs}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../workspaces:/app/workspaces
@@ -78,7 +81,8 @@ services:
       HARNESS_LLM_PROVIDER: ${HARNESS_LLM_PROVIDER:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      HARNESS_HOST_WORKSPACES_ROOT: ${PWD}/workspaces/runs
+      # See the api service note: host path of ../workspaces for the daemon.
+      HARNESS_HOST_WORKSPACES_ROOT: ${HARNESS_HOST_WORKSPACES_ROOT:-${PWD}/../workspaces/runs}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../workspaces:/app/workspaces

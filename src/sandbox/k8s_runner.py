@@ -51,6 +51,9 @@ def build_pod_manifest(name: str, image: str, *, namespace: str,
         "containers": [{
             "name": "sandbox",
             "image": image,
+            # Explicit: k8s defaults `:latest` to Always, which breaks clusters
+            # that side-load the image (kind, airgapped) with ErrImagePull.
+            "imagePullPolicy": "IfNotPresent",
             "command": ["sh", "-c", "sleep infinity"],
             "workingDir": "/workspace",
             "env": [{"name": "PYTHONDONTWRITEBYTECODE", "value": "1"}],
