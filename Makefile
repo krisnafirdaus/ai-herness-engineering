@@ -45,23 +45,29 @@ worker: ## Start a worker (recover stuck runs, then poll the queue)
 recover: ## Crash recovery: resume ALL non-terminal runs and exit
 	$(PY) -m src.main recover
 
+# Resolve an interpreter that has pytest: $(PY) itself, an existing bootstrap
+# .venv, or bootstrap one (pytest only). Sets $$PYBIN for the rest of the recipe.
+PYTEST_RESOLVE = if $(PY) -c "import pytest" >/dev/null 2>&1; then PYBIN="$(PY)"; \
+	elif [ -x .venv/bin/python ] && .venv/bin/python -c "import pytest" >/dev/null 2>&1; then PYBIN=".venv/bin/python"; \
+	else echo "→ pytest not found; bootstrapping an isolated .venv (pytest only)"; \
+		$(PY) -m venv .venv && .venv/bin/python -m pip -q install pytest && PYBIN=".venv/bin/python"; fi
+
 .PHONY: test
 test: ## Run unit tests (integration tests skip when their service is absent)
-	@if $(PY) -c "import pytest" >/dev/null 2>&1; then \
-		$(PY) -m pytest tests -q --ignore=tests/integration; \
-	else \
-		echo "→ pytest not found; bootstrapping an isolated .venv (pytest only)"; \
-		$(PY) -m venv .venv && .venv/bin/python -m pip -q install pytest && .venv/bin/python -m pytest tests -q --ignore=tests/integration; \
-	fi
+	@$(PYTEST_RESOLVE); \
+	$$PYBIN -m pytest tests -q --ignore=tests/integration
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (Docker/Redis/PG/API/network gated per-test)
+	@$(PYTEST_RESOLVE); \
 	HARNESS_TEST_REDIS_URL=$${HARNESS_TEST_REDIS_URL:-redis://localhost:6399/0} \
-	$(PY) -m pytest tests/integration -q -rs
+	$$PYBIN -m pytest tests/integration -q -rs
 
 .PHONY: test-all
 test-all: ## Unit + integration in one go
-	$(PY) -m pytest tests -q -rs
+	@$(PYTEST_RESOLVE); \
+	HARNESS_TEST_REDIS_URL=$${HARNESS_TEST_REDIS_URL:-redis://localhost:6399/0} \
+	$$PYBIN -m pytest tests -q -rs
 
 .PHONY: test-services-up
 test-services-up: ## Start redis+postgres for integration tests (non-default ports)

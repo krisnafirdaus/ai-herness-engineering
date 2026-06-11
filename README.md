@@ -166,7 +166,9 @@ iteration count.
 
 **Persistence is the queue and the recovery log.** Every transition is committed
 to the state store *before* the next begins (autocommit; no half-written
-transitions). The store is the single source of truth — never process memory.
+transitions). The store is the single source of truth — never process memory,
+and deliberately **not** a second checkpointer layer
+([ADR 0008](docs/adr/0008-state-store-as-source-of-truth.md)).
 
 If a worker dies at step 4 of 10:
 
