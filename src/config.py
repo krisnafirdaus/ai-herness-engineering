@@ -53,6 +53,16 @@ class Settings:
     sandbox: str = os.environ.get("HARNESS_SANDBOX", "auto").lower()
     sandbox_image: str = os.environ.get("HARNESS_SANDBOX_IMAGE", "harness-sandbox:latest")
 
+    # ── GitHub (PR creation) ─────────────────────────────────────────────────
+    github_token: str = (os.environ.get("HARNESS_GITHUB_TOKEN")
+                         or os.environ.get("GITHUB_TOKEN", ""))
+    github_api_url: str = os.environ.get("HARNESS_GITHUB_API_URL",
+                                         "https://api.github.com")
+    # Open a PR automatically when a GitHub-hosted run completes and a token
+    # is configured. Set HARNESS_AUTO_PR=0 to disable.
+    auto_pr: bool = os.environ.get("HARNESS_AUTO_PR", "1").strip() not in (
+        "0", "false", "no", "")
+
     # ── State store ──────────────────────────────────────────────────────────
     database_url: str = os.environ.get(
         "HARNESS_DATABASE_URL", f"sqlite:///{REPO_ROOT / 'harness.sqlite3'}"

@@ -53,6 +53,7 @@ def _serialize_run(repo: Repository, run) -> dict:
         "tokens_used": run.tokens_used,
         "token_budget": settings.max_tokens_per_run,
         "error": run.error,
+        "pr_url": run.pr_url,
         "steps": [
             {"step_id": s.step_id, "file": s.file, "action": s.action,
              "status": s.status, "iterations": s.iterations, "reason": s.reason}
@@ -113,6 +114,22 @@ def get_diff(run_id: str) -> dict:
     if not run or not run.workspace_path:
         raise HTTPException(404, "no workspace for run")
     return {"diff": RepoManager(run.workspace_path).diff(run.base_ref)}
+
+
+@app.post("/runs/{run_id}/pr")
+def create_pr(run_id: str) -> dict:
+    """Push the run branch and open (or reuse) the GitHub pull request."""
+    from ..git.github import GitHubError, create_pr_for_run
+
+    repo = Repository()
+    run = repo.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "run not found")
+    try:
+        url = create_pr_for_run(repo, run)
+    except GitHubError as exc:
+        raise HTTPException(409, str(exc))
+    return {"run_id": run_id, "pr_url": url}
 
 
 @app.post("/runs/{run_id}/resume", status_code=202)

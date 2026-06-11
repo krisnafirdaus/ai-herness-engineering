@@ -245,14 +245,38 @@ class StateMachine:
         self._transition(run, RunState.ROLLED_BACK, message="rolled back",
                          error=run.error)
 
-    # ── COMPLETED finalize (commit, ready for PR) ───────────────────────────
+    # ── COMPLETED finalize (commit, then open the PR) ───────────────────────
     def _finalize(self, run: Run) -> None:
         if run.workspace_path:
             sha = RepoManager(run.workspace_path).commit_all(
                 f"harness: {run.task}")
             self.repo.add_event(run.run_id, "INFO",
-                                f"changes committed on {run.branch} ({sha[:10]}) — PR ready",
+                                f"changes committed on {run.branch} ({sha[:10]})",
                                 stage="COMPLETED", data={"commit": sha})
+        self._maybe_open_pr(run)
+
+    def _maybe_open_pr(self, run: Run) -> None:
+        """Auto-PR for GitHub-hosted runs. Never fails a COMPLETED run."""
+        from ..git.github import GitHubError, create_pr_for_run, parse_github_repo
+
+        if not settings.auto_pr or not parse_github_repo(run.repo_url or ""):
+            return
+        if not settings.github_token:
+            self.repo.add_event(
+                run.run_id, "WARN",
+                "auto-PR skipped: no GitHub token configured "
+                "(set GITHUB_TOKEN or HARNESS_GITHUB_TOKEN)", stage="COMPLETED")
+            return
+        try:
+            url = create_pr_for_run(self.repo, run)
+            self.repo.add_event(run.run_id, "INFO", f"PR ready: {url}",
+                                stage="COMPLETED")
+        except GitHubError as exc:
+            # The refactor itself succeeded; surface the PR failure loudly in
+            # the run log but keep the run COMPLETED (operator can re-trigger
+            # via POST /runs/{id}/pr or `python3 -m src.main pr`).
+            self.repo.add_event(run.run_id, "ERROR", f"auto-PR failed: {exc}",
+                                stage="COMPLETED")
 
     # ── small helpers ───────────────────────────────────────────────────────
     def _mark_step(self, run: Run, index: int, status: StepStatus) -> None:

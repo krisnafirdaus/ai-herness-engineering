@@ -6,4 +6,4 @@ unverified edits survive. The same ref produces the final diff that becomes a PR
 """
 from .repo_manager import RepoManager
 
-__all__ = ["RepoManager"]
+__all__ = ["RepoManager"]  # github helpers are imported from src.git.github

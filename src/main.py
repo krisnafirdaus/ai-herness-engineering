@@ -44,6 +44,8 @@ def _print_run(repo: Repository, run) -> None:
     print(f"  branch      : {run.branch}")
     print(f"  steps       : {run.current_step + (1 if run.total_steps else 0)}/{run.total_steps}")
     print(f"  tokens used : {run.tokens_used} (budget {settings.max_tokens_per_run})")
+    if run.pr_url:
+        print(f"  pull request: {_c(run.pr_url, '32')}")
     if run.error:
         print(f"  error       : {_c(run.error, '31')}")
     steps = repo.get_steps(run.run_id)
@@ -143,6 +145,24 @@ def cmd_diff(args) -> int:
     return 0
 
 
+def cmd_pr(args) -> int:
+    """Push the run branch and open (or reuse) the GitHub pull request."""
+    from .git.github import GitHubError, create_pr_for_run
+
+    repo = Repository()
+    run = repo.get_run(args.run_id)
+    if not run:
+        print(f"unknown run: {args.run_id}")
+        return 1
+    try:
+        url = create_pr_for_run(repo, run)
+    except GitHubError as exc:
+        print(_c(f"PR creation failed: {exc}", "31"))
+        return 1
+    print(f"  pull request: {_c(url, '32')}")
+    return 0
+
+
 def cmd_list(args) -> int:
     repo = Repository()
     runs = repo.list_runs(args.status)
@@ -187,6 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
     df = sub.add_parser("diff", help="show the run's git diff vs base")
     df.add_argument("--run-id", required=True)
     df.set_defaults(func=cmd_diff)
+
+    pr = sub.add_parser("pr", help="push branch + open the GitHub pull request")
+    pr.add_argument("--run-id", required=True)
+    pr.set_defaults(func=cmd_pr)
 
     ls = sub.add_parser("list", help="list runs")
     ls.add_argument("--status", help="filter by status")
