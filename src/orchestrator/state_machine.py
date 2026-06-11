@@ -113,7 +113,11 @@ class StateMachine:
     def _attach_sandbox(self, run: Run) -> Sandbox:
         if not run.workspace_path:
             raise RuntimeError("workspace not prepared")
-        return select_sandbox(run.workspace_path)
+        # Local-path repos are the operator's own code; anything cloned from a
+        # remote URL is untrusted and must not silently land in the local
+        # (non-isolating) sandbox — select_sandbox fails closed on that.
+        trusted = not RepoManager.is_remote(run.repo_url or "")
+        return select_sandbox(run.workspace_path, trusted=trusted)
 
     # ── PENDING -> PLANNING ─────────────────────────────────────────────────
     def _prepare(self, run: Run) -> None:

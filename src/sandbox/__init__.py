@@ -19,14 +19,28 @@ from .base import Sandbox
 from .local_runner import LocalSandbox
 
 
-def select_sandbox(workspace: str, image: str | None = None) -> Sandbox:
+class UntrustedSourceError(RuntimeError):
+    """Raised when an untrusted repo would land in a non-isolating sandbox."""
+
+
+def select_sandbox(workspace: str, image: str | None = None, *,
+                   trusted: bool = True) -> Sandbox:
     """Instantiate the configured sandbox for a run's workspace.
 
-    ``auto`` (default) prefers Docker and silently falls back to local when the
-    daemon is unreachable, so a demo never hard-fails on a missing daemon.
+    ``auto`` (default) prefers Docker, then Kubernetes (when configured), and
+    falls back to the local sandbox only for **trusted** sources. The local
+    backend has no kernel/network isolation, so ``trusted=False`` (repos
+    cloned from remote URLs) refuses the local fallback unless the operator
+    sets ``HARNESS_ALLOW_LOCAL_UNTRUSTED=1`` — failing closed beats silently
+    degrading the security boundary.
     """
     mode = settings.sandbox
     image = image or settings.sandbox_image
+
+    if mode == "k8s":
+        from .k8s_runner import K8sSandbox
+
+        return K8sSandbox(workspace, image)
 
     if mode in ("docker", "auto"):
         from .docker_runner import DockerSandbox, ImageMissing, docker_available
@@ -37,11 +51,19 @@ def select_sandbox(workspace: str, image: str | None = None) -> Sandbox:
             except ImageMissing:
                 if mode == "docker":
                     raise
-                # auto: image not built yet -> degrade to local rather than fail
+                # auto: image not built yet -> consider the local fallback
         elif mode == "docker":
             raise RuntimeError(
                 "HARNESS_SANDBOX=docker but no Docker daemon is reachable. "
                 "Start Docker or set HARNESS_SANDBOX=local."
             )
-        # auto -> fall back
+        # auto -> fall through to the trust-gated local fallback
+
+    if not trusted and not settings.allow_local_untrusted:
+        raise UntrustedSourceError(
+            "Refusing to run an untrusted (remote) repository in the local "
+            "sandbox: it provides no kernel or network isolation. Use the "
+            "docker/k8s sandbox, or set HARNESS_ALLOW_LOCAL_UNTRUSTED=1 to "
+            "accept the risk explicitly."
+        )
     return LocalSandbox(workspace)

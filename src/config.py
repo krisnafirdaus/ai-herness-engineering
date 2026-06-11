@@ -57,6 +57,14 @@ class Settings:
     # ── Sandbox ──────────────────────────────────────────────────────────────
     sandbox: str = os.environ.get("HARNESS_SANDBOX", "auto").lower()
     sandbox_image: str = os.environ.get("HARNESS_SANDBOX_IMAGE", "harness-sandbox:latest")
+    # Fail-closed policy: repos cloned from REMOTE URLs are untrusted and may
+    # not run in the (non-kernel-isolated) local sandbox unless explicitly
+    # allowed. Local-path repos are the operator's own code and stay allowed.
+    allow_local_untrusted: bool = os.environ.get(
+        "HARNESS_ALLOW_LOCAL_UNTRUSTED", "").strip().lower() in ("1", "true", "yes")
+    # Optional `ulimit -u` for local sandbox commands (0 = leave unset; a
+    # too-low value can break process-heavy test suites on shared machines).
+    local_sandbox_nproc: int = _int("HARNESS_LOCAL_NPROC", 0)
 
     # ── GitHub (PR creation) ─────────────────────────────────────────────────
     github_token: str = (os.environ.get("HARNESS_GITHUB_TOKEN")

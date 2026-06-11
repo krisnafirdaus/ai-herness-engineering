@@ -32,8 +32,12 @@ class RepoManager:
         )
 
     @staticmethod
-    def _is_url(src: str) -> bool:
+    def is_remote(src: str) -> bool:
+        """True for URL sources (untrusted third-party code by default)."""
         return src.startswith(("http://", "https://", "git@", "ssh://"))
+
+    # Backwards-compatible alias used internally.
+    _is_url = is_remote
 
     def prepare(self, repo_url: str, branch: str) -> str:
         """Clone/copy ``repo_url`` into the workspace, create ``branch``, and
