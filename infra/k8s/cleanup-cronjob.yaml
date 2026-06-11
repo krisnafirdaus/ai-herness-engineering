@@ -1,0 +1,31 @@
+# Daily retention sweep for the cluster topology: removes expired terminal-run
+# workspaces, purges run records (steps/telemetry/events cascade) past the
+# retention window, and clears orphan workspace dirs. The same sweep also runs
+# periodically inside every worker (HARNESS_SWEEP_INTERVAL_SEC); this CronJob
+# guarantees cleanup even when the worker pool is scaled to zero.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: harness-cleanup
+spec:
+  schedule: "10 3 * * *"            # 03:10 daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: harness:latest
+              command: ["python", "-m", "src.main", "cleanup"]
+              envFrom:
+                - configMapRef: {name: harness-config}
+              env:
+                - name: HARNESS_DATABASE_URL
+                  valueFrom: {secretKeyRef: {name: harness-db, key: DATABASE_URL}}
+              resources:
+                requests: {cpu: "100m", memory: "128Mi"}
+                limits: {cpu: "500m", memory: "256Mi"}

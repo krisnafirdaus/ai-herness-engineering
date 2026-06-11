@@ -56,9 +56,25 @@ class Worker:
             self.drive(run_id)
 
     def run_forever(self, poll_interval: float = 2.0) -> None:
+        from .config import settings
+
         self.recover()
         print("[worker] ready; polling for runs")
+        last_sweep = 0.0
         while True:
+            # Periodic retention sweep: workspaces/records don't grow forever.
+            if time.time() - last_sweep >= settings.sweep_interval_sec:
+                last_sweep = time.time()
+                try:
+                    from .retention import sweep
+
+                    report = sweep(self.repo)
+                    if report.workspaces_removed or report.runs_purged \
+                            or report.orphans_removed:
+                        print(f"[worker] retention: {report.summary()}")
+                except Exception as exc:  # cleanup must never kill the worker
+                    print(f"[worker] retention sweep errored: {exc}")
+
             run_id = self.queue.dequeue(timeout=5)
             if run_id:
                 self.drive(run_id)

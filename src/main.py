@@ -179,6 +179,21 @@ def cmd_pr(args) -> int:
     return 0
 
 
+def cmd_cleanup(args) -> int:
+    """Apply the retention policy (workspaces, runs, traces, logs, orphans)."""
+    from .retention import sweep
+
+    report = sweep(Repository(), dry_run=args.dry_run)
+    for ws in report.workspaces_removed:
+        print(f"  workspace : {ws}")
+    for rid in report.runs_purged:
+        print(f"  run purged: {rid}")
+    for orphan in report.orphans_removed:
+        print(f"  orphan dir: {orphan}")
+    print(f"  {report.summary()}")
+    return 0
+
+
 def cmd_list(args) -> int:
     repo = Repository()
     runs = repo.list_runs(args.status)
@@ -234,6 +249,12 @@ def build_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("list", help="list runs")
     ls.add_argument("--status", help="filter by status")
     ls.set_defaults(func=cmd_list)
+
+    cl = sub.add_parser("cleanup",
+                        help="apply the retention policy (workspaces + records)")
+    cl.add_argument("--dry-run", action="store_true",
+                    help="report what would be removed without removing it")
+    cl.set_defaults(func=cmd_cleanup)
     return p
 
 

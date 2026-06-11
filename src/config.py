@@ -102,6 +102,15 @@ class Settings:
     max_tokens_per_run: int = _int("HARNESS_MAX_TOKENS_PER_RUN", 200_000)
     step_timeout_sec: int = _int("HARNESS_STEP_TIMEOUT_SEC", 600)
 
+    # ── Retention / cleanup ──────────────────────────────────────────────────
+    # Terminal-run workspaces are deleted after this TTL; full run records
+    # (runs + steps + telemetry + events) are purged after the retention
+    # window. Workers sweep on this interval; `python3 -m src.main cleanup`
+    # and the k8s CronJob run the same sweep.
+    workspace_ttl_hours: int = _int("HARNESS_WORKSPACE_TTL_HOURS", 72)
+    run_retention_days: int = _int("HARNESS_RUN_RETENTION_DAYS", 30)
+    sweep_interval_sec: int = _int("HARNESS_SWEEP_INTERVAL_SEC", 3600)
+
     # ── Telemetry ────────────────────────────────────────────────────────────
     langfuse_public_key: str = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
     langfuse_secret_key: str = os.environ.get("LANGFUSE_SECRET_KEY", "")

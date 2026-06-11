@@ -167,6 +167,10 @@ class Repository:
              run.error, run.pr_url, run.updated_at, run.run_id),
         )
 
+    def delete_run(self, run_id: str) -> None:
+        """Purge a run and (via ON DELETE CASCADE) its steps/telemetry/events."""
+        self.conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
+
     def add_tokens(self, run_id: str, tokens: int) -> int:
         self.conn.execute(
             "UPDATE runs SET tokens_used = tokens_used + ?, updated_at=? WHERE run_id=?",
