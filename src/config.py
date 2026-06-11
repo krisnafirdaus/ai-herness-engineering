@@ -49,6 +49,11 @@ class Settings:
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
 
+    # ── Orchestration engine ─────────────────────────────────────────────────
+    # langgraph = LangGraph StateGraph driver; builtin = stdlib while-loop;
+    # auto = langgraph when installed, else builtin.
+    orchestrator: str = os.environ.get("HARNESS_ORCHESTRATOR", "auto").lower()
+
     # ── Sandbox ──────────────────────────────────────────────────────────────
     sandbox: str = os.environ.get("HARNESS_SANDBOX", "auto").lower()
     sandbox_image: str = os.environ.get("HARNESS_SANDBOX_IMAGE", "harness-sandbox:latest")

@@ -33,7 +33,35 @@ class StateMachine:
 
     # ── public driver ───────────────────────────────────────────────────────
     def drive(self, run_id: str) -> Run:
-        """Advance ``run_id`` until it reaches a terminal state, then return it."""
+        """Advance ``run_id`` until it reaches a terminal state, then return it.
+
+        The orchestration engine is selected by ``HARNESS_ORCHESTRATOR``:
+        ``langgraph`` (the LangGraph StateGraph in ``graph.py``), ``builtin``
+        (the dependency-free while-loop below), or ``auto`` — LangGraph when
+        importable, else builtin. Both engines share the same stage logic and
+        persistence, so resume/crash semantics are identical.
+        """
+        if self._engine() == "langgraph":
+            from .graph import LangGraphDriver
+
+            return LangGraphDriver(self).drive(run_id)
+        return self._drive_builtin(run_id)
+
+    def _engine(self) -> str:
+        mode = settings.orchestrator
+        if mode == "builtin":
+            return "builtin"
+        from .graph import langgraph_available
+
+        if mode == "langgraph":
+            if not langgraph_available():
+                raise RuntimeError(
+                    "HARNESS_ORCHESTRATOR=langgraph but the langgraph package "
+                    "is not installed (pip install langgraph)")
+            return "langgraph"
+        return "langgraph" if langgraph_available() else "builtin"
+
+    def _drive_builtin(self, run_id: str) -> Run:
         run = self.repo.get_run(run_id)
         if run is None:
             raise ValueError(f"unknown run: {run_id}")

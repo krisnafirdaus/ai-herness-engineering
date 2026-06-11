@@ -1,12 +1,18 @@
 # ── Core runtime ────────────────────────────────────────────────────────────
-# The orchestrator, state machine, storage (SQLite) and local sandbox run on the
-# Python standard library ALONE. Nothing below is required for the offline demo
-# (`make demo`) to work — they unlock optional production integrations.
+# The stage logic, state store (SQLite) and local sandbox run on the Python
+# standard library; everything below is what the production deployment uses.
+# The offline demo (`make demo`) still works without any of it via the builtin
+# orchestration fallback.
 
-# API server (optional — `python -m src.main run` works without it)
+# Orchestration engine (LangGraph StateGraph drives the run loop; the builtin
+# while-loop driver is the zero-dependency fallback: HARNESS_ORCHESTRATOR)
+langgraph==1.2.4
+
+# API server + streaming (SSE/WebSocket)
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 pydantic==2.7.4
+httpx==0.28.1          # FastAPI TestClient + API integration tests
 
 # Real LLM providers (optional — the deterministic offline mock needs neither)
 anthropic==0.34.2
