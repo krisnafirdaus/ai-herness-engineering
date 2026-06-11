@@ -21,7 +21,7 @@ from ..sandbox.base import Sandbox
 from ..sandbox.file_tools import FileTools
 from ..storage.models import Repository, Run
 from ..telemetry.tracing import Tracer
-from .executor import Executor
+from .executor import ExecError, Executor
 from .planner import Planner
 from .states import ALLOWED_TRANSITIONS, RunState, StepStatus
 from .verifier import Verifier
@@ -139,15 +139,21 @@ class StateMachine:
         self._transition(run, RunState.EXECUTING_STEP,
                          message=f"begin step {idx + 1}/{run.total_steps}")
 
-    # ── EXECUTING_STEP / RETRYING_STEP -> VERIFYING_STEP ────────────────────
+    # ── EXECUTING_STEP / RETRYING_STEP -> VERIFYING_STEP | RETRYING_STEP ────
     def _execute(self, run: Run, sandbox: Sandbox, tracer: Tracer) -> None:
         step = self.repo.get_step(run.run_id, run.current_step)
         tools = FileTools(sandbox)
-        executor = Executor(get_client(), tools, tracer)
+        executor = Executor(
+            get_client(), tools, tracer,
+            on_event=lambda level, msg: self.repo.add_event(
+                run.run_id, level, msg, stage="EXECUTING_STEP"))
         try:
             summary = executor.execute(run.run_id, run.task, step, step.last_error)
-        except Exception as exc:  # executor produced unusable output
-            self._fail(run, f"executor error on {step.step_id}: {exc}")
+        except ExecError as exc:
+            # A patch that failed to apply (or unparseable output) is a
+            # RECOVERABLE failure: persist it as structured error state and
+            # route it back through the retry loop, same as a verify failure.
+            self._handle_apply_failure(run, step, str(exc))
             return
         self.repo.add_event(run.run_id, "INFO",
                             f"executor[{step.step_id}] iter={step.iterations}: {summary}",
@@ -192,6 +198,32 @@ class StateMachine:
             self.repo.update_step(step)
             self._fail(run, f"step {step.step_id} failed after "
                             f"{settings.max_retries} retries")
+
+    def _handle_apply_failure(self, run: Run, step, reason: str) -> None:
+        """A patch failed to apply — consume a retry instead of aborting."""
+        step.last_error = {
+            "step_id": step.step_id,
+            "iteration": step.iterations,
+            "status": "failed",
+            "phase": "apply",
+            "error": reason,
+            "next_action": "retry_executor",
+        }
+        self.repo.add_event(run.run_id, "WARN",
+                            f"step {step.step_index + 1} apply failed "
+                            f"(iter={step.iterations}): {reason}",
+                            stage="EXECUTING_STEP", data=step.last_error)
+        if step.iterations < settings.max_retries:
+            step.iterations += 1
+            step.status = StepStatus.RETRYING.value
+            self.repo.update_step(step)
+            self._transition(run, RunState.RETRYING_STEP,
+                             message=f"apply retry {step.iterations}/{settings.max_retries}")
+        else:
+            step.status = StepStatus.FAILED.value
+            self.repo.update_step(step)
+            self._fail(run, f"step {step.step_id} failed to apply after "
+                            f"{settings.max_retries} retries: {reason}")
 
     def _advance_or_complete(self, run: Run, completed_index: int) -> None:
         next_index = completed_index + 1

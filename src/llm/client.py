@@ -119,39 +119,64 @@ class MockClient:
 
         return max(sources, key=score)
 
-    # -- executor --
+    # -- executor (patch-based, mirrors the real EXECUTOR_SYSTEM contract) ----
     def _execute(self, ctx: dict) -> str:
         step = ctx.get("step", {})
         file = step.get("file", "")
-        had_error = bool(ctx.get("last_error"))
+        current = ctx.get("current_content", "") or ""
         base = file.rsplit("/", 1)[-1]
 
         if base == "users.py":
-            content = _PY_USERS_FIXED if had_error else _PY_USERS_BUGGY
-            summary = ("Fix NameError: call validate_payload, the function that "
-                       "actually exists" if had_error else
-                       "Add request validation before persisting the user")
+            edits, summary = self._py_users_edits(current)
         elif base == "users.js":
-            content = _JS_USERS_FIXED if had_error else _JS_USERS_BUGGY
-            summary = ("Fix ReferenceError: call validatePayload" if had_error
-                       else "Add request validation before persisting the user")
+            edits, summary = self._js_users_edits(current)
         else:
-            # Unknown file: safe, test-preserving no-op so arbitrary repos don't
-            # crash the mock. (Real edits require a real provider.)
-            current = ctx.get("current_content", "")
-            content = current + "\n# (mock provider: no template for this file)\n"
-            summary = "No-op edit (mock has no template for this file)"
+            # Unknown file: an empty patch is a safe no-op so arbitrary repos
+            # don't crash the mock. (Real edits require a real provider.)
+            edits, summary = [], "No-op patch (mock has no recipe for this file)"
 
         return json.dumps({"file": file, "action": "modify",
-                           "content": content, "summary": summary})
+                           "edits": edits, "summary": summary})
+
+    @staticmethod
+    def _py_users_edits(current: str) -> tuple[list[dict], str]:
+        # Retry: the buggy call is present — patch just the bad name.
+        if "validate_user(payload)" in current:
+            return ([{"find": "    validate_user(payload)",
+                      "replace": "    validate_payload(payload)"}],
+                    "Fix NameError: call validate_payload, the function that "
+                    "actually exists")
+        # First attempt: insert validation, but call it by the WRONG name so the
+        # verify -> retry -> fix loop is exercised (NameError at runtime).
+        if "validate_payload" not in current:
+            return ([
+                {"find": "_USERS = {}",
+                 "replace": "_USERS = {}\n\n" + _PY_VALIDATE_FN.rstrip("\n")},
+                {"find": "def create_user(payload):\n    user_id",
+                 "replace": "def create_user(payload):\n"
+                            "    validate_user(payload)\n    user_id"},
+            ], "Add request validation before persisting the user")
+        return [], "No-op patch (validation already present)"
+
+    @staticmethod
+    def _js_users_edits(current: str) -> tuple[list[dict], str]:
+        if "validateUser(payload)" in current:
+            return ([{"find": "  validateUser(payload);",
+                      "replace": "  validatePayload(payload);"}],
+                    "Fix ReferenceError: call validatePayload")
+        if "validatePayload" not in current:
+            return ([
+                {"find": "const _users = new Map();",
+                 "replace": "const _users = new Map();\n\n" + _JS_VALIDATE_FN.rstrip("\n")},
+                {"find": "function createUser(payload) {\n  const id",
+                 "replace": "function createUser(payload) {\n"
+                            "  validateUser(payload);\n  const id"},
+            ], "Add request validation before persisting the user")
+        return [], "No-op patch (validation already present)"
 
 
-# ── Mock edit templates (Python dummy repo) ──────────────────────────────────
-_PY_USERS_FIXED = '''\
-"""In-memory user service (stands in for an API controller)."""
-
-_USERS = {}
-
+# ── Mock patch snippets (inserted blocks) ────────────────────────────────────
+_PY_VALIDATE_FN = '''\
 REQUIRED_FIELDS = ("email", "name")
 
 
@@ -164,33 +189,9 @@ def validate_payload(payload):
             raise ValueError(f"missing required field: {field}")
     if "@" not in payload["email"]:
         raise ValueError("invalid email")
-
-
-def create_user(payload):
-    validate_payload(payload)
-    user_id = len(_USERS) + 1
-    user = {"id": user_id, "email": payload["email"], "name": payload["name"]}
-    _USERS[user_id] = user
-    return user
-
-
-def get_user(user_id):
-    return _USERS.get(user_id)
 '''
 
-# Same as FIXED but calls a function name that does not exist -> NameError at
-# runtime, surfaced by the unittest checks. This is the deliberate first-attempt
-# bug that demonstrates the verify -> retry -> fix loop.
-_PY_USERS_BUGGY = _PY_USERS_FIXED.replace(
-    "    validate_payload(payload)\n", "    validate_user(payload)\n"
-)
-
-
-# ── Mock edit templates (Node dummy repo) ────────────────────────────────────
-_JS_USERS_FIXED = '''\
-"use strict";
-
-const _users = new Map();
+_JS_VALIDATE_FN = '''\
 const REQUIRED_FIELDS = ["email", "name"];
 
 function validatePayload(payload) {
@@ -206,25 +207,7 @@ function validatePayload(payload) {
     throw new Error("invalid email");
   }
 }
-
-function createUser(payload) {
-  validatePayload(payload);
-  const id = _users.size + 1;
-  const user = { id, email: payload.email, name: payload.name };
-  _users.set(id, user);
-  return user;
-}
-
-function getUser(id) {
-  return _users.get(id);
-}
-
-module.exports = { createUser, getUser };
 '''
-
-_JS_USERS_BUGGY = _JS_USERS_FIXED.replace(
-    "  validatePayload(payload);\n", "  validateUser(payload);\n"
-)
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────

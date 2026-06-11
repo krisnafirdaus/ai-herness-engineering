@@ -51,14 +51,22 @@ ALLOWED_TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.PENDING: {RunState.PLANNING, RunState.FAILED},
     RunState.PLANNING: {RunState.PLAN_READY, RunState.FAILED},
     RunState.PLAN_READY: {RunState.EXECUTING_STEP, RunState.COMPLETED, RunState.FAILED},
-    RunState.EXECUTING_STEP: {RunState.VERIFYING_STEP, RunState.FAILED},
+    RunState.EXECUTING_STEP: {
+        RunState.VERIFYING_STEP,
+        RunState.RETRYING_STEP,   # patch failed to apply -> structured retry
+        RunState.FAILED,
+    },
     RunState.VERIFYING_STEP: {
         RunState.EXECUTING_STEP,  # advance to next step
         RunState.RETRYING_STEP,   # this step failed, retry budget remains
         RunState.COMPLETED,       # last step passed
         RunState.FAILED,          # retry budget exhausted / token budget blown
     },
-    RunState.RETRYING_STEP: {RunState.VERIFYING_STEP, RunState.FAILED},
+    RunState.RETRYING_STEP: {
+        RunState.VERIFYING_STEP,
+        RunState.RETRYING_STEP,   # retry's own patch failed to apply
+        RunState.FAILED,
+    },
     RunState.FAILED: {RunState.ROLLED_BACK},
     RunState.COMPLETED: set(),
     RunState.ROLLED_BACK: set(),
