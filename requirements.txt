@@ -15,8 +15,10 @@ pydantic==2.7.4
 httpx==0.28.1          # FastAPI TestClient + API integration tests
 
 # Real LLM providers (optional — the deterministic offline mock needs neither)
-anthropic==0.34.2
-openai==1.40.0
+# NB: must be httpx-0.28-compatible (older pins pass the removed `proxies`
+# kwarg and explode at client construction — caught by the live LLM test).
+anthropic==0.45.2
+openai==1.59.7
 
 # Docker sandbox (optional — local isolated-workspace sandbox is the fallback)
 docker==7.1.0
