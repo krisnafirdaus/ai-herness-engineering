@@ -2,14 +2,22 @@
 
 
 A **production-shaped harness** that takes a public GitHub repo + a task, then
-drives three agents — **Planner → Executor → Verifier** — to plan a refactor,
-edit files in an isolated sandbox, run the repo's tests/linters, **fix its own
-failures**, and stop with a **rollback** after 3 failed attempts. Every run is
-backed by a **persistent, resumable state machine**, so a worker crash at step 4
-of 10 resumes from step 4 — without re-planning or re-paying for verified steps.
+drives three agents — **Planner → Executor → Verifier** — on a **LangGraph
+`StateGraph`** to plan a refactor over a static import-dependency graph, apply
+**patch-based edits** (exact search/replace, never whole-file rewrites) in an
+isolated sandbox, run the repo's tests/linters, **fix its own failures**, roll
+back after 3 failed attempts — and **open a GitHub pull request** when green.
+Every transition is persisted *and pushed live over SSE/WebSocket*, so a worker
+crash at step 4 of 10 resumes from step 4 — without re-planning or re-paying
+for verified steps.
 
 > The emphasis is the *system*: orchestration, safety, resumability, sandboxing,
 > the verification loop, telemetry, and a deployment blueprint — not the prompt.
+
+> **Deep dive:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) walks one run
+> end-to-end (life of a run, failure-mode table, security model), and
+> [docs/adr/](docs/adr/) holds eight ADRs recording each major decision and the
+> trade-offs behind it.
 
 ```
         repo + task
@@ -21,9 +29,9 @@ of 10 resumes from step 4 — without re-planning or re-paying for verified step
    └──────────────────┘                            │  telemetry  (SQLite/PG)  │
             │                                       └──────────────────────────┘
             ▼                                                  ▲
-   ┌──────────────────┐   edits    ┌─────────────┐            │ every transition
+   ┌──────────────────┐   patch    ┌─────────────┐            │ every transition
    │   EXECUTOR        │ ─────────▶ │   SANDBOX    │           │ persisted before
-   │  (one step)       │           │ docker/local │           │ the next begins
+   │  (one step)       │           │ k8s/docker/… │           │ the next begins
    └──────────────────┘           └─────────────┘            │ (resumable)
             ▲                            │ run tests + lint    │
             │  structured error          ▼                     │
@@ -31,7 +39,7 @@ of 10 resumes from step 4 — without re-planning or re-paying for verified step
    │  retry (≤3)       │◀──────────│   VERIFIER    │────────────┘
    └──────────────────┘   pass→next└──────────────┘
             │
-            ▼  exhausted → FAILED → ROLLED_BACK      all steps green → COMPLETED (PR-ready)
+            ▼  exhausted → FAILED → ROLLED_BACK      all steps green → COMPLETED → GitHub PR
 ```
 
 ---
@@ -47,8 +55,16 @@ of 10 resumes from step 4 — without re-planning or re-paying for verified step
 | **State mgmt & resilience** — crash mid-run, resume without re-planning | `state_machine.py`, `src/storage/` | `tests/test_orchestrator.py::test_crash_recovery_resumes_without_replanning` (Planner called exactly once) |
 | **Telemetry** — token per agent node, span durations, loop breakdown | `src/telemetry/tracing.py` | `python3 -m src.main traces --run-id …` |
 | **Cost guardrails** — retry + token budget + step timeout | `src/config.py`, `state_machine.py` | §6 below; `test_token_budget_guardrail_trips` |
-| **Deployment & horizontal scaling** | `infra/Dockerfile`, `docker-compose.yml`, `k8s/` | §10 below |
-| **Tenant isolation** — Agent A can't read Agent B's FS | `src/sandbox/docker_runner.py`, `infra/k8s/worker.yaml` | per-run network-none container + per-`run_id` bind mount |
+| **Deployment & horizontal scaling** | `infra/Dockerfile`, `docker-compose.yml`, `k8s/` | §13 below |
+| **Tenant isolation** — Agent A can't read Agent B's FS | `src/sandbox/docker_runner.py`, `src/sandbox/k8s_runner.py` | per-run network-isolated container/pod + per-`run_id` workspace |
+| **Agent orchestration framework** | `src/orchestrator/graph.py` — LangGraph `StateGraph`, conditional entry resumes mid-flight | [ADR 0001](docs/adr/0001-langgraph-orchestration.md); `tests/test_langgraph_engine.py` runs both engines through identical scenarios |
+| **Real-time visibility (push, not polling)** | SSE `GET /runs/{id}/stream` + WebSocket `/runs/{id}/ws`, `src/events.py` | [ADR 0002](docs/adr/0002-push-streaming.md); `tests/test_streaming.py`; §8 below |
+| **GitHub PR creation** | `src/git/github.py` — push run branch + open PR on `COMPLETED` | [ADR 0006](docs/adr/0006-github-pr-creation.md); `tests/test_github_pr.py`; §9 below |
+| **Dependency-aware planning** | `src/analysis/dep_graph.py` — static import graph + topological step order | [ADR 0005](docs/adr/0005-dependency-graph-planning.md); `tests/test_dep_graph.py` |
+| **Patch-based edits (no whole-file rewrites)** | Executor emits ordered, exact, unique search/replace hunks; whole-file only on `create` | [ADR 0003](docs/adr/0003-patch-based-edits.md); `tests/test_executor_patches.py` |
+| **Untrusted-code sandboxing (tiered, fail-closed)** | k8s pod-per-run ▸ docker ▸ hardened local; remote repos refuse local | [ADR 0004](docs/adr/0004-sandbox-tiers.md); `tests/test_sandbox_hardening.py`, `tests/test_k8s_sandbox.py` |
+| **Integration tests against real services** | `tests/integration/` — Docker, Redis, Postgres, HTTP API, GitHub clone, real LLM providers | `make test-integration` (each test gates on its service) |
+| **Retention / cleanup policy** | `src/retention.py` — workspace TTL, record purge, orphan reap | [ADR 0007](docs/adr/0007-retention-policy.md); `tests/test_retention.py`; §12 below |
 
 ---
 
@@ -87,8 +103,10 @@ python3 -m src.main resume --run-id run_xxx                 # resume after a cra
 python3 -m src.main recover                                 # resume ALL stuck runs
 python3 -m src.main status --run-id run_xxx                 # run + step state
 python3 -m src.main traces --run-id run_xxx                 # token/latency breakdown
-python3 -m src.main log    --run-id run_xxx                 # event log
+python3 -m src.main log    --run-id run_xxx --follow        # event log (live tail)
 python3 -m src.main diff   --run-id run_xxx                 # the produced diff (PR body)
+python3 -m src.main pr     --run-id run_xxx                 # push branch + open GitHub PR
+python3 -m src.main cleanup --dry-run                       # preview the retention sweep
 python3 -m src.main list                                    # all runs
 ```
 
@@ -115,12 +133,20 @@ the harness implements it.
 
 | Stage | Role | Constraints | Code |
 |------|------|-------------|------|
-| **Planner** | Scans the tree, reads key snippets, builds dependency hints, emits a **strict-JSON execution plan** (one file per step + the checks to run). | **Read-only** — only calls sandbox *read* tools; output is validated into typed `Step` rows before anything runs. | `src/orchestrator/planner.py` |
-| **Executor** | Applies **one** step by emitting the full new file content, written through traversal-guarded file tools. On a retry it receives the previous failure and must **diagnose + fix**. | Sandboxed; edits via `read_file`/`write_file`/`search_replace` only. | `src/orchestrator/executor.py` |
+| **Planner** | Scans the tree, builds the **static import-dependency graph** (`src/analysis/dep_graph.py`), reads the snippets ranked most relevant (task-keyword hits + dependents-centrality), emits a **strict-JSON execution plan**. Steps are **topologically sorted** over declared `depends_on` ∪ import edges, so dependencies are edited before dependents ([ADR 0005](docs/adr/0005-dependency-graph-planning.md)). | **Read-only** — only calls sandbox *read* tools; output is validated into typed `Step` rows before anything runs. | `src/orchestrator/planner.py` |
+| **Executor** | Applies **one** step as a **patch**: ordered, exact, **unique** search/replace hunks through traversal-guarded file tools; whole-file content is allowed only for `create` ([ADR 0003](docs/adr/0003-patch-based-edits.md)). A patch that fails to apply becomes structured error state and consumes a retry. On a retry it receives the previous failure and must **diagnose + fix**. | Sandboxed; edits via `read_file`/`search_replace` (`write_file` only on `create`). | `src/orchestrator/executor.py` |
 | **Verifier** | Runs the step's check commands (tests, linters) **inside the sandbox**; on failure captures stdout/stderr into a structured error blob fed back to the Executor. | Sandboxed; the error blob is the Verifier→Executor contract. | `src/orchestrator/verifier.py` |
 
-The **state machine** (`src/orchestrator/state_machine.py`) is the single driver
-and the centerpiece. Run states:
+The run loop is a **LangGraph `StateGraph`** (`src/orchestrator/graph.py`): one
+node per phase, **conditional edges routed on the persisted run status**, and a
+conditional entry point so a resumed run enters the graph mid-flight
+([ADR 0001](docs/adr/0001-langgraph-orchestration.md)).
+`HARNESS_ORCHESTRATOR=auto|langgraph|builtin` selects the engine — `auto` uses
+LangGraph when installed and falls back to the dependency-free builtin driver
+(`state_machine.py`), which keeps the zero-install offline demo alive. Both
+engines wrap the **same stage methods** and the same transition rules, and
+`tests/test_langgraph_engine.py` drives both through identical scenarios. Run
+states:
 
 ```
 PENDING → PLANNING → PLAN_READY → EXECUTING_STEP ⇄ VERIFYING_STEP
@@ -179,28 +205,41 @@ tokens so the accounting path is exercised offline.
 
 ## 7. Sandbox security
 
-Two interchangeable backends implement one `Sandbox` contract
-(`src/sandbox/`). **File edits** happen on the run's workspace path; **all
-untrusted command execution** (the repo's own tests/lint) is isolated:
+Three interchangeable backends implement one `Sandbox` contract
+(`src/sandbox/`); the threat model (untrusted **repo code** × untrusted
+**model output**) is analyzed in [ADR 0004](docs/adr/0004-sandbox-tiers.md).
+**File edits** happen on the run's workspace path; **all untrusted command
+execution** (the repo's own tests/lint) is isolated:
 
-* **DockerSandbox** (primary) — one container per run with:
-  `--network none` (no network for repo code), **read-only root fs** with a
-  single writable **bind mount** scoped to *that run's* workspace (no global
-  shared volume → tenant/run isolation), `mem_limit` + `pids_limit` + CPU cap,
-  `cap_drop=ALL`, and `no-new-privileges`.
+* **K8sSandbox** (`HARNESS_SANDBOX=k8s`, `src/sandbox/k8s_runner.py`) — one
+  **hardened pod per run**: non-root, `cap_drop=ALL`, read-only rootfs,
+  `seccompProfile: RuntimeDefault`, no service-account token, resource
+  limits, **deny-all NetworkPolicy** (`infra/k8s/sandbox-networkpolicy.yaml`),
+  optional **gVisor** RuntimeClass (`infra/k8s/runtimeclass-gvisor.yaml`).
+  Files move over the exec API — no shared volumes, no docker socket anywhere.
+* **DockerSandbox** — one container per run with: `--network none` (no network
+  for repo code), **read-only root fs** with a single writable **bind mount**
+  scoped to *that run's* workspace (no global shared volume → tenant/run
+  isolation), `mem_limit` + `pids_limit` + CPU cap, `cap_drop=ALL`, and
+  `no-new-privileges`.
 * **LocalSandbox** (fallback) — a per-run isolated workspace
-  (`workspaces/runs/{run_id}/repo`) with subprocess execution. Honestly weaker:
-  **no kernel/network isolation**; it exists so the harness always runs (CI,
-  Docker-less laptops) and is the auto-fallback when no daemon is present.
+  (`workspaces/runs/{run_id}/repo`) with hardened subprocess execution
+  (scrubbed env — no host secrets leak in, process-group kill on timeout,
+  optional `ulimit`s). Still **no kernel/network isolation** — so it is
+  **fail-closed**: remote-URL repos are marked *untrusted* and **refuse this
+  backend** unless `HARNESS_ALLOW_LOCAL_UNTRUSTED=1` is set explicitly. It
+  remains the auto-fallback only for trusted local paths (CI, Docker-less
+  laptops).
 
-Additional hardening that applies to both: **path-traversal guard** — every file
-op is resolved and asserted to stay inside the workspace (a malicious plan can't
-touch `/etc/passwd`); `search_replace` refuses ambiguous (non-unique) matches.
+Additional hardening that applies to all three: **path-traversal guard** —
+every file op is resolved and asserted to stay inside the workspace (a
+malicious plan can't touch `/etc/passwd`); `search_replace` refuses ambiguous
+(non-unique) matches.
 
-> **Tenant isolation:** runs never share a workspace or volume; the Docker
-> backend gives each its own network-less container. The local backend is *not*
-> a multi-tenant boundary — for untrusted, multi-tenant production use the Docker
-> backend (or the k8s gVisor/Job pattern noted in `infra/k8s/worker.yaml`).
+> **Tenant isolation:** runs never share a workspace, volume, or pod; the
+> k8s/Docker backends give each run its own network-isolated kernel-level
+> boundary. The local backend is *not* a multi-tenant boundary and refuses
+> untrusted code by default (above).
 
 Build the sandbox image (enables the Docker backend):
 
@@ -209,7 +248,46 @@ make sandbox-image        # docker build -t harness-sandbox:latest -f infra/Dock
 HARNESS_SANDBOX=docker python3 -m src.main run --repo ./dummy-repos/python-api-sample --task "..."
 ```
 
-## 8. Telemetry setup
+## 8. Real-time visibility (push, not polling)
+
+Every state transition is written to the `events` table **and pushed** to live
+subscribers over an event bus — the durable log and the stream are the same
+data, so nothing can be seen on the stream that isn't persisted
+([ADR 0002](docs/adr/0002-push-streaming.md)):
+
+```bash
+curl -N localhost:8000/runs/run_xxx/stream      # SSE: snapshot → live events → end
+# wscat -c ws://localhost:8000/runs/run_xxx/ws  # WebSocket: same feed as JSON
+python3 -m src.main log --run-id run_xxx --follow   # CLI live tail
+```
+
+* **SSE** (`GET /runs/{id}/stream`) sends a snapshot event, then every
+  transition as it happens, with heartbeats and an `end` event at terminal
+  state. Reconnects are **lossless**: browsers send `Last-Event-ID`
+  automatically and the server replays anything missed from the events table.
+* **Fan-out** is in-process on a single node and **Redis pub/sub** when the
+  API and workers are separate processes (`HARNESS_EVENT_BUS=auto|memory|redis`;
+  `auto` follows the queue choice). A dropped pub/sub message can't lose data —
+  subscribers catch up from the table (`tests/test_streaming.py`).
+
+## 9. GitHub PR creation
+
+A GitHub-hosted run that reaches `COMPLETED` **pushes its run branch and opens
+a pull request** (`src/git/github.py`,
+[ADR 0006](docs/adr/0006-github-pr-creation.md)):
+
+* **Token:** `HARNESS_GITHUB_TOKEN` (wins) or `GITHUB_TOKEN`, `repo` scope.
+  The push authenticates via ephemeral `GIT_CONFIG_*` env vars — the token
+  never appears in argv, stored remotes, or sandbox env.
+* **Auto-PR** on completion is default-on when a token is present
+  (`HARNESS_AUTO_PR=0` disables). Manual / re-trigger:
+  `python3 -m src.main pr --run-id run_xxx` or `POST /runs/{id}/pr` —
+  **idempotent**: an existing PR for the branch is returned, not duplicated.
+* **Failure containment:** a PR failure emits an `ERROR` event and leaves the
+  run `COMPLETED` (the work is not lost); re-trigger any time. GitHub
+  Enterprise via `HARNESS_GITHUB_API_URL`.
+
+## 10. Telemetry setup
 
 Spans are **always** persisted to the `telemetry` table — one row per agent
 invocation with `input_tokens`, `output_tokens`, `duration_ms`,
@@ -239,14 +317,31 @@ exported as a Langfuse generation (telemetry export never affects run outcome):
 LANGFUSE_PUBLIC_KEY=pk-... LANGFUSE_SECRET_KEY=sk-... python3 -m src.main run ...
 ```
 
-## 9. Viewing traces
+## 11. Viewing traces
 
 * **CLI:** `python3 -m src.main traces --run-id run_xxx` (summary + per-span rows)
 * **API:** `GET /runs/{id}/traces` returns the same data as JSON
+* **Live:** `GET /runs/{id}/stream` (SSE) / `/runs/{id}/ws` (WebSocket) — §8
 * **Event log:** `python3 -m src.main log --run-id run_xxx` (every transition)
 * **Langfuse:** open your Langfuse project — traces are keyed by `run_id`
 
-## 10. Production deployment
+## 12. Retention & cleanup
+
+Disk and DB growth are bounded by a **retention sweep** (`src/retention.py`,
+[ADR 0007](docs/adr/0007-retention-policy.md)) that every worker runs at
+startup and every `HARNESS_SWEEP_INTERVAL_SEC` (default hourly); also on
+demand via `python3 -m src.main cleanup [--dry-run]` and as a daily
+**k8s CronJob** (`infra/k8s/cleanup-cronjob.yaml`):
+
+| What | Policy | Env |
+|---|---|---|
+| Workspaces of **terminal** runs | deleted after TTL | `HARNESS_WORKSPACE_TTL_HOURS=72` |
+| Old runs + steps + traces + events | purged after the retention window | `HARNESS_RUN_RETENTION_DAYS=30` |
+| Orphan workspaces (no run row) | reaped on every sweep | — |
+
+Active (non-terminal) runs are never touched, so a sweep can't break resume.
+
+## 13. Production deployment
 
 `infra/` contains a runnable, production-shaped blueprint:
 
@@ -255,7 +350,9 @@ infra/
   Dockerfile            # harness control-plane image (api + worker)
   Dockerfile.sandbox    # the isolated execution image (node + python)
   docker-compose.yml    # api + worker(s) + postgres + redis
-  k8s/{api,worker,postgres,redis}.yaml
+  k8s/                  # api, worker (RBAC scoped to pod-per-run sandboxing),
+                        # postgres, redis, deny-all sandbox NetworkPolicy,
+                        # gVisor RuntimeClass, daily cleanup CronJob
 ```
 
 ```bash
@@ -276,9 +373,11 @@ docker compose up -d --scale worker=4    # scale the worker pool horizontally
 * **Crash safety at scale:** every worker's startup `recover()` re-drives any
   non-terminal run, so pod evictions never strand work. Autoscale workers on
   Redis queue depth (KEDA).
-* **k8s note:** don't mount the host docker socket in a multi-tenant cluster —
-  use a gVisor/Kata RuntimeClass or a per-run Job with a deny-all NetworkPolicy
-  (a drop-in `Sandbox` backend); see `infra/k8s/worker.yaml`.
+* **k8s sandbox (implemented):** workers run `HARNESS_SANDBOX=k8s` — one
+  hardened pod per run behind a deny-all NetworkPolicy, optional gVisor
+  RuntimeClass, **no docker socket anywhere** (§7,
+  [ADR 0004](docs/adr/0004-sandbox-tiers.md)). The worker's RBAC is scoped to
+  pod create/exec in its own namespace (`infra/k8s/worker.yaml`).
 
 The API works single-node **without** Redis/Postgres too (SQLite + an in-process
 background task): `make api` then
@@ -294,51 +393,79 @@ src/
   main.py                       CLI
   config.py                     env-resolved settings + guardrails
   orchestrator/
-    state_machine.py            the resumable driver (centerpiece)
+    graph.py                    LangGraph StateGraph engine        (ADR 0001)
+    state_machine.py            stage logic + builtin fallback driver
     states.py                   RunState/StepStatus + transition rules
     planner.py  executor.py  verifier.py
+  analysis/dep_graph.py         static import-dependency graph     (ADR 0005)
   sandbox/
-    base.py local_runner.py docker_runner.py   isolation backends
-    file_tools.py             read/write/search_replace (traversal-guarded)
+    base.py local_runner.py docker_runner.py k8s_runner.py   (ADR 0004)
+    file_tools.py             read/search_replace/write (traversal-guarded)
   storage/
     db.py  models.py          SQLite/Postgres state store + repository (DAO)
+  events.py                   event bus: in-proc / Redis pub-sub   (ADR 0002)
+  retention.py                workspace TTL + record purge sweep   (ADR 0007)
   telemetry/tracing.py        spans + token usage (+ optional Langfuse)
-  git/repo_manager.py         clone/copy, branch, base-ref, diff, rollback
+  git/
+    repo_manager.py           clone/copy, branch, base-ref, diff, rollback
+    github.py                 push + PR creation                   (ADR 0006)
   llm/  client.py prompts.py  anthropic | openai | deterministic mock
   api/server.py  worker.py  queue.py   control plane + worker pool + queue
+docs/                          ARCHITECTURE.md + adr/0001…0008
 infra/                         Dockerfiles, compose, k8s blueprint
 dummy-repos/                   python-api-sample, node-api-sample
-tests/                         orchestrator + unit tests
+tests/                         unit suites + tests/integration (real services)
 ```
 
 ## Configuration
 
-All via env (or a `.env` — see `.env.example`). Highlights: `HARNESS_LLM_PROVIDER`
-(`mock`/`anthropic`/`openai`), `HARNESS_SANDBOX` (`auto`/`docker`/`local`),
-`HARNESS_DATABASE_URL`, `HARNESS_QUEUE` (`db`/`redis`), `HARNESS_MAX_RETRIES`,
-`HARNESS_MAX_TOKENS_PER_RUN`.
+All via env (or a `.env` — see `.env.example`, fully commented). Highlights:
+`HARNESS_ORCHESTRATOR` (`auto`/`langgraph`/`builtin`), `HARNESS_LLM_PROVIDER`
+(`mock`/`anthropic`/`openai`), `HARNESS_SANDBOX` (`auto`/`docker`/`k8s`/`local`
+— fail-closed for untrusted repos), `HARNESS_EVENT_BUS` (`auto`/`memory`/`redis`),
+`HARNESS_DATABASE_URL`, `HARNESS_QUEUE` (`db`/`redis`),
+`HARNESS_GITHUB_TOKEN`/`HARNESS_AUTO_PR`, `HARNESS_MAX_RETRIES`,
+`HARNESS_MAX_TOKENS_PER_RUN`, `HARNESS_WORKSPACE_TTL_HOURS`,
+`HARNESS_RUN_RETENTION_DAYS`.
 
 ## Testing
 
 ```bash
-make test        # python3 -m pytest -q
+make test                 # unit suites (offline; integration tests auto-skip)
+make test-services-up     # redis + postgres on non-default ports for…
+make test-integration     # …integration tests: Docker, Redis, Postgres, HTTP
+                          #   API, public GitHub clone, real LLM providers
+make test-all             # both
 ```
 
-Covers the happy path (with a real verify-fail→fix cycle), telemetry breakdown,
-rollback on exhausted retries, the token guardrail, **crash recovery without
-re-planning**, path-traversal blocking, and the state-transition guard.
+**Unit** suites cover the happy path (with a real verify-fail→fix cycle),
+telemetry breakdown, rollback on exhausted retries, the token guardrail,
+**crash recovery without re-planning** (on both engines), patch application,
+dependency-graph ordering, sandbox hardening/fail-closed policy, streaming,
+PR creation, and retention.
+
+**Integration** suites (`tests/integration/`) exercise the real things — a
+real Docker daemon, real Redis queue + pub/sub, real Postgres store, the API
+over HTTP, a real public-GitHub clone, and real Anthropic/OpenAI calls — each
+test **gates on its service** (skips with a reason when absent, runs in CI/dev
+where present) so `make test-all` is safe anywhere.
 
 ## Known limitations (honest)
 
 * The **`mock` provider** understands only the two bundled dummy repos (it
   deliberately bugs its first attempt to demo the loop) and is a safe no-op
   elsewhere. Real tasks need `anthropic`/`openai`.
-* **Postgres** is wired and dialect-portable but **SQLite is the verified path**
-  in this submission (no PG daemon in the build env); compose/k8s use Postgres.
-* **Docker sandbox** requires a reachable daemon + the built sandbox image; with
-  neither, `auto` transparently falls back to the (weaker) local sandbox.
-* The Planner emits **one step per file**; it doesn't yet split very large files
-  into sub-edits or model cross-file ordering beyond simple dependency hints.
-* The local sandbox is **not** a security boundary for untrusted multi-tenant
-  code — use the Docker/k8s backends for that.
-* No web UI; observability is CLI + JSON API (+ optional Langfuse).
+* **Postgres** is dialect-portable and covered by
+  `tests/integration/test_postgres_store.py`, but SQLite remains the
+  zero-setup default; compose/k8s use Postgres.
+* **Docker sandbox** needs a reachable daemon + the built sandbox image. `auto`
+  falls back to the hardened local sandbox **only for trusted local paths** —
+  remote repos fail closed instead (§7).
+* The Planner emits **one step per file** ordered by the import graph; it
+  doesn't yet split very large files into sub-edits, and the static analyzer
+  resolves Python/JS-style imports only (other languages fall back to declared
+  `depends_on`).
+* The local sandbox is **not** a kernel-level boundary — multi-tenant
+  production should run the k8s (or Docker) backend.
+* No web UI; observability is CLI + JSON API + SSE/WebSocket (+ optional
+  Langfuse).
