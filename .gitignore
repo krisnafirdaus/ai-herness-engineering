@@ -16,7 +16,8 @@ harness.sqlite3*
 # Node (inside dummy repos)
 node_modules/
 
-# OS / editors
+# OS / editors / local tooling
 .DS_Store
 .idea/
 .vscode/
+.serena/

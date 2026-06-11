@@ -1,6 +1,5 @@
 # AI Agent Harness — Autonomous Multi-File Refactoring Runner
 
-
 A **production-shaped harness** that takes a public GitHub repo + a task, then
 drives three agents — **Planner → Executor → Verifier** — on a **LangGraph
 `StateGraph`** to plan a refactor over a static import-dependency graph, apply
