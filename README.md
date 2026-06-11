@@ -219,6 +219,9 @@ execution** (the repo's own tests/lint) is isolated:
   limits, **deny-all NetworkPolicy** (`infra/k8s/sandbox-networkpolicy.yaml`),
   optional **gVisor** RuntimeClass (`infra/k8s/runtimeclass-gvisor.yaml`).
   Files move over the exec API — no shared volumes, no docker socket anywhere.
+  The deny-all policy is **enforcement-tested** against a real Calico cluster
+  (`tests/integration/test_k8s_networkpolicy.py`: egress works → apply policy
+  → egress blocked); note kind's default kindnet does *not* enforce policies.
 * **DockerSandbox** — one container per run with: `--network none` (no network
   for repo code), **read-only root fs** with a single writable **bind mount**
   scoped to *that run's* workspace (no global shared volume → tenant/run
@@ -469,5 +472,7 @@ where present) so `make test-all` is safe anywhere.
   `depends_on`).
 * The local sandbox is **not** a kernel-level boundary — multi-tenant
   production should run the k8s (or Docker) backend.
+* **gVisor** is manifest-level verified only; enforcing it needs `runsc`-enabled
+  nodes (GKE Sandbox or a Linux host) — not provable on a macOS kind cluster.
 * No web UI; observability is CLI + JSON API + SSE/WebSocket (+ optional
   Langfuse).
