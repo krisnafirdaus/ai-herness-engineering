@@ -128,10 +128,26 @@ def cmd_traces(args) -> int:
 
 
 def cmd_log(args) -> int:
+    import time
+
     repo = Repository()
-    for e in repo.get_events(args.run_id):
-        lvl = _c(e["level"], {"ERROR": "31", "WARN": "33"}.get(e["level"], "36"))
-        print(f"  {e['ts']}  {lvl:<5} [{e['stage'] or '-'}] {e['message']}")
+    last_id = 0
+
+    def emit(events) -> None:
+        nonlocal last_id
+        for e in events:
+            last_id = e["id"]
+            lvl = _c(e["level"], {"ERROR": "31", "WARN": "33"}.get(e["level"], "36"))
+            print(f"  {e['ts']}  {lvl:<5} [{e['stage'] or '-'}] {e['message']}",
+                  flush=True)
+
+    emit(repo.get_events(args.run_id))
+    while getattr(args, "follow", False):
+        run = repo.get_run(args.run_id)
+        if run and RunState(run.status).is_terminal:
+            break
+        time.sleep(0.5)
+        emit(repo.get_events_since(args.run_id, last_id))
     return 0
 
 
@@ -202,6 +218,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     lg = sub.add_parser("log", help="run event log")
     lg.add_argument("--run-id", required=True)
+    lg.add_argument("--follow", action="store_true",
+                    help="keep tailing until the run reaches a terminal state "
+                         "(service clients should use GET /runs/{id}/stream)")
     lg.set_defaults(func=cmd_log)
 
     df = sub.add_parser("diff", help="show the run's git diff vs base")

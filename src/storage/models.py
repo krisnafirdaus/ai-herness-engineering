@@ -234,16 +234,40 @@ class Repository:
 
     # -- events (run log) ----------------------------------------------------
     def add_event(self, run_id: str, level: str, message: str, *,
-                  stage: str | None = None, data: dict | None = None) -> None:
-        self.conn.execute(
+                  stage: str | None = None, data: dict | None = None) -> int:
+        """Persist a run event, then push it to live subscribers.
+
+        The DB row is the durable record (and the SSE replay source); the bus
+        publish is the real-time path. Returns the event id so streaming
+        clients can resume from it (SSE ``Last-Event-ID``).
+        """
+        ts = _now()
+        row = self.conn.execute(
             "INSERT INTO events (run_id, ts, level, stage, message, data_json) "
-            "VALUES (?,?,?,?,?,?)",
-            (run_id, _now(), level, stage, message,
+            "VALUES (?,?,?,?,?,?) RETURNING id",
+            (run_id, ts, level, stage, message,
              json.dumps(data) if data else None),
-        )
+        ).fetchone()
+        event_id = row["id"] if row else 0
+        from ..events import get_bus  # lazy: avoid import cycle at module load
+
+        get_bus().publish(run_id, {
+            "id": event_id, "run_id": run_id, "ts": ts, "level": level,
+            "stage": stage, "message": message, "data_json":
+                json.dumps(data) if data else None,
+        })
+        return event_id
 
     def get_events(self, run_id: str) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM events WHERE run_id=? ORDER BY id ASC", (run_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_events_since(self, run_id: str, after_id: int) -> list[dict]:
+        """Events with id > ``after_id`` — the SSE replay/catch-up query."""
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE run_id=? AND id>? ORDER BY id ASC",
+            (run_id, after_id),
         ).fetchall()
         return [dict(r) for r in rows]

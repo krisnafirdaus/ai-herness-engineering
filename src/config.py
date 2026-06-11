@@ -72,6 +72,11 @@ class Settings:
     queue: str = os.environ.get("HARNESS_QUEUE", "db").lower()
     redis_url: str = os.environ.get("HARNESS_REDIS_URL", "redis://localhost:6379/0")
 
+    # ── Event streaming ──────────────────────────────────────────────────────
+    # Push bus behind the SSE/WebSocket endpoints. auto = redis when the work
+    # queue is redis (separate worker processes), else in-process fan-out.
+    event_bus: str = os.environ.get("HARNESS_EVENT_BUS", "auto").lower()
+
     # ── Guardrails ───────────────────────────────────────────────────────────
     max_retries: int = _int("HARNESS_MAX_RETRIES", 3)
     max_tokens_per_run: int = _int("HARNESS_MAX_TOKENS_PER_RUN", 200_000)
