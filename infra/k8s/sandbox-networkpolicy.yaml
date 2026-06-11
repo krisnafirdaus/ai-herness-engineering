@@ -1,0 +1,19 @@
+# Deny-all network policy for sandbox pods (matched by label, applied
+# cluster-side so sandboxed code can never opt out of its own isolation).
+#
+# Every pod the K8sSandbox backend creates carries `app: harness-sandbox`;
+# this policy blocks ALL ingress and ALL egress for those pods — repo code
+# cannot phone home, scan the cluster network, or hit the kube API.
+#
+# Apply once per namespace that runs sandboxes:
+#   kubectl apply -f infra/k8s/sandbox-networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: harness-sandbox-deny-all
+spec:
+  podSelector:
+    matchLabels:
+      app: harness-sandbox
+  policyTypes: [Ingress, Egress]
+  # No ingress/egress rules = nothing is allowed.

@@ -21,6 +21,9 @@ openai==1.40.0
 # Docker sandbox (optional — local isolated-workspace sandbox is the fallback)
 docker==7.1.0
 
+# Kubernetes sandbox (HARNESS_SANDBOX=k8s: per-run hardened pods)
+kubernetes==36.0.2
+
 # Telemetry export (optional — tracing always works via the SQLite span store)
 langfuse==2.44.0
 

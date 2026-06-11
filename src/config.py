@@ -66,6 +66,13 @@ class Settings:
     # too-low value can break process-heavy test suites on shared machines).
     local_sandbox_nproc: int = _int("HARNESS_LOCAL_NPROC", 0)
 
+    # ── Kubernetes sandbox (HARNESS_SANDBOX=k8s) ─────────────────────────────
+    k8s_namespace: str = os.environ.get("HARNESS_K8S_NAMESPACE", "default")
+    # Set to a sandboxed runtime (e.g. "gvisor") for a kernel boundary; see
+    # infra/k8s/runtimeclass-gvisor.yaml.
+    k8s_runtime_class: str = os.environ.get("HARNESS_K8S_RUNTIME_CLASS", "")
+    k8s_pod_startup_sec: int = _int("HARNESS_K8S_POD_STARTUP_SEC", 120)
+
     # ── GitHub (PR creation) ─────────────────────────────────────────────────
     github_token: str = (os.environ.get("HARNESS_GITHUB_TOKEN")
                          or os.environ.get("GITHUB_TOKEN", ""))

@@ -2,13 +2,15 @@
 # queue and drives runs independently; runs are isolated by run_id/workspace.
 #
 # Sandbox isolation in k8s: do NOT mount the host docker.sock in a multi-tenant
-# cluster. Production-grade options (pick per threat model):
-#   * a sandboxed container runtime (gVisor/Kata) as the worker's RuntimeClass,
-#     and launch each run's checks as a nested job;
-#   * or schedule each run as its own Kubernetes Job with a restricted
-#     PodSecurityContext + NetworkPolicy (deny-all egress) — the cleanest tenant
-#     boundary. The bundled worker uses the Docker backend; swapping in a
-#     "k8s Job" sandbox backend implements the same src.sandbox.base.Sandbox API.
+# cluster. Set HARNESS_SANDBOX=k8s so each run's checks execute in a dedicated,
+# hardened sandbox pod (src/sandbox/k8s_runner.py): non-root, all capabilities
+# dropped, read-only rootfs, no service-account token, resource-limited, and
+# network-isolated by the deny-all policy in sandbox-networkpolicy.yaml.
+# Add HARNESS_K8S_RUNTIME_CLASS=gvisor (runtimeclass-gvisor.yaml) for a
+# user-space-kernel boundary on top.
+#
+# The worker needs RBAC for pods/create+get+delete + pods/exec in its
+# namespace (see the Role/RoleBinding below).
 #
 # Autoscale on queue depth via KEDA (ScaledObject on the Redis list length).
 apiVersion: apps/v1
@@ -23,7 +25,7 @@ spec:
     metadata:
       labels: {app: harness-worker}
     spec:
-      # runtimeClassName: gvisor   # <- recommended for untrusted repo execution
+      serviceAccountName: harness-worker
       containers:
         - name: worker
           image: harness:latest
@@ -31,6 +33,10 @@ spec:
           envFrom:
             - configMapRef: {name: harness-config}
           env:
+            - name: HARNESS_SANDBOX
+              value: "k8s"                    # per-run hardened sandbox pods
+            - name: HARNESS_K8S_RUNTIME_CLASS
+              value: "gvisor"                 # remove if runsc isn't installed
             - name: HARNESS_DATABASE_URL
               valueFrom: {secretKeyRef: {name: harness-db, key: DATABASE_URL}}
             - name: ANTHROPIC_API_KEY
@@ -41,3 +47,34 @@ spec:
       # On restart, each worker's startup recover() resumes any non-terminal runs
       # it finds in the DB, so a pod eviction mid-run never strands or restarts work.
       terminationGracePeriodSeconds: 30
+---
+# Least-privilege RBAC for the worker: it may only manage sandbox pods in its
+# own namespace (create/inspect/exec/delete) — nothing cluster-wide.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness-worker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harness-worker-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harness-worker-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: harness-worker
+roleRef:
+  kind: Role
+  name: harness-worker-sandbox
+  apiGroup: rbac.authorization.k8s.io
