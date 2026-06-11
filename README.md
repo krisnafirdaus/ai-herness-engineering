@@ -74,7 +74,7 @@ No install is required for the offline demo. Optional extras (API server, real
 LLM SDKs, Docker, Langfuse, pytest) live in `requirements.txt`:
 
 ```bash
-git clone <this-repo> && cd ai-herness-engineering
+git clone https://github.com/krisnafirdaus/ai-harness-engineering.git && cd ai-harness-engineering
 python3 -m pip install -r requirements.txt pytest   # optional; or: make setup
 ```
 
